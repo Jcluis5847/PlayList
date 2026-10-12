@@ -20,16 +20,16 @@ https://broker.cdn.rcs.net.ar/mnp/t0i1o7528g7ef00000006ok69ikbp24i/output.mpd
 https://broker.cdn.rcs.net.ar/mnp/elnueve/output.mpd
 #EXTINF:-1  tvg-id="TN.ar" tvg-title="TN Todo Noticias" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/tn.png?raw=true" tvg-chno="014" group-title="Noticias",TN Todo Noticias
 https://www.youtube.com/embed/cb12KmMMDJA
-#EXTINF:-1  tvg-id="A24.ar" tvg-title="A24" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/a24.png?raw=true" tvg-chno="015" group-title="Noticias",A24
-https://broker.cdn.rcs.net.ar/mnp/f4i30000001178tfvf222zer6o7mwgdd/output.mpd
+#EXTINF:-1  tvg-id="A24.ar" tvg-title="A24" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/a24.png?raw=true" tvg-chno="015" tvg-type="YOUTUBE" group-title="Noticias",A24
+https://www.youtube.com/embed/ArKbAx1K-2U
 #EXTINF:-1  tvg-id="C5N.ar" tvg-title="C5N" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/c5n.png?raw=true" tvg-chno="016" tvg-type="YOUTUBE" group-title="Noticias",C5N
 https://www.youtube.com/embed/j6oh4Kqz3UM
-#EXTINF:-1  tvg-id="CronicaTV.ar" tvg-title="Cronica HD" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/cronica.png?raw=true" tvg-chno="017" group-title="Noticias",Cronica HD
-https://access.cdn.rcs.net.ar/mnp/oce000000095ng0pa36h7krinjbeki8f/output.mpd
-#EXTINF:-1  tvg-id="Canal26.ar" tvg-title="Canal 26" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/c26tv.png?raw=true" tvg-chno="018" group-title="Noticias",Canal 26
-https://broker.cdn.rcs.net.ar/mnp/kharwzzmy100000012mb517x6muxvpna/output.mpd
-#EXTINF:-1  tvg-id="LN+.ar" tvg-title="LN+" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/LN+.png?raw=true" tvg-chno="019" group-title="Noticias",LN+
-https://broker.cdn.rcs.net.ar/mnp/lnmas/output.mpd
+#EXTINF:-1  tvg-id="CronicaTV.ar" tvg-title="Cronica HD" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/cronica.png?raw=true" tvg-chno="017" tvg-type="YOUTUBE" group-title="Noticias",Cronica HD
+https://www.youtube.com/embed/hw4uHyct4vg
+#EXTINF:-1  tvg-id="Canal26.ar" tvg-title="Canal 26" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/c26tv.png?raw=true" tvg-chno="018" tvg-type="YOUTUBE" group-title="Noticias",Canal 26
+https://www.youtube.com/embed/C_RnFD6xiX8
+#EXTINF:-1  tvg-id="LN+.ar" tvg-title="LN+" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/LN+.png?raw=true" tvg-chno="019" tvg-type="YOUTUBE" group-title="Noticias",LN+
+https://www.youtube.com/embed/FEWZjXJ7M0c
 
 
 #EXTINF:-1  tvg-id="NET TV.ar" tvg-title="NET TVew" tvg-logo="https://github.com/Jcluis5847/logos/blob/main/nett.png?raw=true" tvg-chno="021" group-title="Noticias",NET TV
