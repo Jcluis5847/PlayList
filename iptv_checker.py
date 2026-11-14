@@ -1,11 +1,12 @@
 # -*- coding: cp1252 -*-
-"""IPTV CHECKER - verificador de listas M3U con comprobación real de reproducción.
+"""IPTV CHECKER - verificador de listas M3U con comprobaciÃ³n real de reproducciÃ³n.
 
 Requisitos:
-    py -m pip install python-vlc
+    py -m pip install python-vlc psutil      (psutil: monitor de CPU / RAM / red)
     + VLC de escritorio instalado (misma arquitectura que Python: 64 bits con 64 bits)
 """
 import ctypes
+import importlib
 import queue
 import re
 import sys
@@ -24,12 +25,19 @@ except Exception as exc:  # ImportError, o libvlc no encontrada
     vlc = None
     VLC_ERROR = f"{type(exc).__name__}: {exc}"
 
+try:
+    import psutil
+    PSUTIL_ERROR = None
+except Exception as exc:  # el monitor del sistema es opcional
+    psutil = None
+    PSUTIL_ERROR = f"{type(exc).__name__}: {exc}"
+
 APP_TITLE = "IPTV CHECKER"
 OUTPUT_NAME = "CANALES_FUNCIONALES.m3u"
 
-STARTUP_TIMEOUT = 20      # segundos máximos esperando el primer cuadro / inicio
+STARTUP_TIMEOUT = 20      # segundos mÃ¡ximos esperando el primer cuadro / inicio
 AUDIO_GRACE = 4           # segundos en Playing sin video para considerar "solo audio"
-MIN_FPS = 1               # cuadros nuevos por segundo mínimos para considerar el flujo estable
+MIN_FPS = 1               # cuadros nuevos por segundo mÃ­nimos para considerar el flujo estable
 MAX_WORKERS = 32
 MAX_LISTS = 15            # casilleros de listas en la ventana "+"
 VIDEO_TRACK_TYPE = 1      # libvlc_track_video
@@ -65,7 +73,7 @@ def download_m3u(source):
 
 
 def _extinf_name(line):
-    """Nombre = texto tras la primera coma que no está dentro de comillas."""
+    """Nombre = texto tras la primera coma que no estÃ¡ dentro de comillas."""
     in_quotes = False
     for i, ch in enumerate(line):
         if ch == '"':
@@ -102,7 +110,7 @@ def parse_m3u(text):
                 Channel(current_name or f"Canal {len(channels) + 1}", line, pending)
             )
 
-        # Con URL válida o no, los metadatos pendientes no deben "filtrarse" al siguiente.
+        # Con URL vÃ¡lida o no, los metadatos pendientes no deben "filtrarse" al siguiente.
         pending = []
         current_name = None
 
@@ -121,7 +129,7 @@ def dedupe_channels(channels):
 
 
 def classify_resolution(width, height):
-    """Etiqueta de resolución a partir del tamaño del video: 720P, 1080P, 2K, 4K..."""
+    """Etiqueta de resoluciÃ³n a partir del tamaÃ±o del video: 720P, 1080P, 2K, 4K..."""
     if width <= 0 or height <= 0:
         return ""
     if width >= 7000 or height >= 4000:
@@ -142,7 +150,7 @@ def classify_resolution(width, height):
 
 
 def with_resolution(meta_lines, name, resolution):
-    """Copia de las líneas de metadatos con ' (720P)' al final del título del #EXTINF."""
+    """Copia de las lÃ­neas de metadatos con ' (720P)' al final del tÃ­tulo del #EXTINF."""
     if not resolution:
         return list(meta_lines)
 
@@ -151,7 +159,7 @@ def with_resolution(meta_lines, name, resolution):
     for line in meta_lines:
         if not done and line.upper().startswith("#EXTINF:"):
             base = RES_SUFFIX_RE.sub("", line).rstrip()
-            if _extinf_name(base) is None:  # sin título: se lo agregamos
+            if _extinf_name(base) is None:  # sin tÃ­tulo: se lo agregamos
                 base = base + name if base.endswith(",") else f"{base},{name}"
             line = f"{base} ({resolution})"
             done = True
@@ -170,11 +178,20 @@ def fmt_time(seconds):
 
 
 def short(text, limit=60):
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    return text if len(text) <= limit else text[: limit - 1] + "â€¦"
+
+
+def fmt_speed(bytes_per_second):
+    bits = max(bytes_per_second, 0) * 8
+    if bits >= 1e6:
+        return f"{bits / 1e6:.1f} Mbps"
+    if bits >= 1e3:
+        return f"{bits / 1e3:.0f} Kbps"
+    return f"{bits:.0f} bps"
 
 
 # ----------------------------------------------------------------------------
-# VLC: salida de video a memoria, ventana embebida y lectura de resolución
+# VLC: salida de video a memoria, ventana embebida y lectura de resoluciÃ³n
 # ----------------------------------------------------------------------------
 class FrameSink:
     """Recibe los cuadros en memoria (modo silencio): sin ventana, un sink por reproductor."""
@@ -222,10 +239,10 @@ def embed_player(player, wid):
 def get_video_resolution(player, media, ignore_size=None):
     """(ancho, alto) del video de ORIGEN, o (0, 0) si no se pudo leer.
 
-    1) Pistas del stream (media.tracks_get): tamaño real de origen, aunque el video
-       se esté escalando a 320x180 en memoria.
+    1) Pistas del stream (media.tracks_get): tamaÃ±o real de origen, aunque el video
+       se estÃ© escalando a 320x180 en memoria.
     2) player.video_get_size como respaldo (se descarta si coincide con ignore_size,
-       que es el tamaño forzado del modo silencio).
+       que es el tamaÃ±o forzado del modo silencio).
     """
     try:
         tracks = media.tracks_get()
@@ -255,7 +272,7 @@ def get_video_resolution(player, media, ignore_size=None):
 
 
 # ----------------------------------------------------------------------------
-# Aplicación
+# AplicaciÃ³n
 # ----------------------------------------------------------------------------
 class IPTVChecker:
 
@@ -273,9 +290,9 @@ class IPTVChecker:
         # Estado (solo lo modifica el hilo de la UI, a partir de eventos)
         self.channels = []
         self.header = "#EXTM3U"
-        self.good = {}          # índice -> Channel
+        self.good = {}          # Ã­ndice -> Channel
         self.errors = []        # (nombre, motivo)
-        self.active = {}        # índice -> nombre (canales en prueba ahora mismo)
+        self.active = {}        # Ã­ndice -> nombre (canales en prueba ahora mismo)
         self.total = 0
         self.checked = 0
         self.dur_sum = 0.0
@@ -283,10 +300,18 @@ class IPTVChecker:
         self.test_start = None
         self.test_end = None
 
+        self.monitor_error = None      # texto del error actual del monitor (None = todo bien)
+        self.monitor_missing = False   # True si el error es que falta psutil
+        self._monitor_job = None
+        self._net_prev = None
+        self._help_win = None
+
         self._controls = []
         self._build_ui()
         self._build_sources_window()
         self._on_mode_change()
+
+        self._start_monitor()
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(100, self._process_events)
@@ -297,16 +322,22 @@ class IPTVChecker:
         outer = ttk.Frame(self.root, padding=16)
         outer.pack(fill="both", expand=True)
 
-        ttk.Label(outer, text="IPTV CHECKER", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        header = ttk.Frame(outer)
+        header.pack(fill="x")
+        ttk.Label(header, text="IPTV CHECKER", font=("Segoe UI", 20, "bold")).pack(
+            side="left", anchor="n"
+        )
+        self._build_monitor(header)
+
         ttk.Label(
             outer,
-            text="Verificador de listas M3U con comprobación real de reproducción y resolución",
+            text="Verificador de listas M3U con comprobaciÃ³n real de reproducciÃ³n y resoluciÃ³n",
             foreground="#666",
         ).pack(anchor="w", pady=(0, 14))
 
         ttk.Label(
             outer,
-            text="URL de la lista M3U o ruta de un archivo local (con + cargás hasta "
+            text="URL de la lista M3U o ruta de un archivo local (con + cargÃ¡s hasta "
                  f"{MAX_LISTS} listas):",
         ).pack(anchor="w")
 
@@ -319,7 +350,7 @@ class IPTVChecker:
 
         self.url_entry = ttk.Entry(url_row, textvariable=self.url_var)
         self.url_entry.pack(side="left", fill="x", expand=True)
-        browse_btn = ttk.Button(url_row, text="Examinar…", command=lambda: self._browse_multi(0))
+        browse_btn = ttk.Button(url_row, text="Examinarâ€¦", command=lambda: self._browse_multi(0))
         browse_btn.pack(side="left", padx=(8, 0))
         self.plus_btn = ttk.Button(url_row, text="+", width=3, command=self._open_sources_window)
         self.plus_btn.pack(side="left", padx=(8, 0))
@@ -330,8 +361,8 @@ class IPTVChecker:
             var.trace_add("write", lambda *_: self._update_sources_info())
         self._update_sources_info()
 
-        # ---- Configuración de prueba
-        settings = ttk.LabelFrame(outer, text="Configuración de prueba", padding=10)
+        # ---- ConfiguraciÃ³n de prueba
+        settings = ttk.LabelFrame(outer, text="ConfiguraciÃ³n de prueba", padding=10)
         settings.pack(fill="x", pady=(0, 12))
 
         ttk.Label(settings, text="Tiempo por canal (segundos):").grid(row=0, column=0, sticky="w")
@@ -376,7 +407,7 @@ class IPTVChecker:
         )
         audio_chk.grid(row=2, column=3, columnspan=2, sticky="w", pady=(10, 0))
 
-        # Controles que se bloquean mientras corre la comprobación
+        # Controles que se bloquean mientras corre la comprobaciÃ³n
         self._controls = [
             self.url_entry, browse_btn, seconds_spin, radio_silent, radio_visual,
             self.workers_spin, dedupe_chk, audio_chk,
@@ -386,7 +417,7 @@ class IPTVChecker:
         actions = ttk.Frame(outer)
         actions.pack(fill="x", pady=(0, 12))
 
-        self.start_btn = ttk.Button(actions, text="INICIAR COMPROBACIÓN", command=self.start)
+        self.start_btn = ttk.Button(actions, text="INICIAR COMPROBACIÃ“N", command=self.start)
         self.start_btn.pack(side="left")
         self.stop_btn = ttk.Button(actions, text="DETENER", command=self.stop, state="disabled")
         self.stop_btn.pack(side="left", padx=8)
@@ -395,11 +426,11 @@ class IPTVChecker:
         )
         self.save_btn.pack(side="right")
 
-        # ---- Estado de la comprobación
-        stats = ttk.LabelFrame(outer, text="Estado de la comprobación", padding=10)
+        # ---- Estado de la comprobaciÃ³n
+        stats = ttk.LabelFrame(outer, text="Estado de la comprobaciÃ³n", padding=10)
         stats.pack(fill="x", pady=(0, 12))
 
-        self.current_var = tk.StringVar(value="Esperando una lista…")
+        self.current_var = tk.StringVar(value="Esperando una listaâ€¦")
         ttk.Label(stats, textvariable=self.current_var, font=("Segoe UI", 10, "bold")).pack(anchor="w")
 
         self.progress = ttk.Progressbar(stats, maximum=100, mode="determinate")
@@ -437,10 +468,276 @@ class IPTVChecker:
         ttk.Label(
             outer,
             text=("Un canal es funcional si VLC decodifica cuadros de video de forma sostenida "
-                  "durante el tiempo configurado. También se detecta su resolución."),
+                  "durante el tiempo configurado. TambiÃ©n se detecta su resoluciÃ³n."),
             foreground="#666",
             font=("Segoe UI", 8),
         ).pack(anchor="w", pady=(8, 0))
+
+    # ------------------------------------------- Monitor de CPU / RAM / red
+    def _build_monitor(self, parent):
+        box = ttk.Frame(parent)
+        box.pack(side="right", anchor="n")
+
+        bold = ("Consolas", 9, "bold")
+        mono = ("Consolas", 9)
+
+        # --- Vista normal
+        ok = ttk.Frame(box)
+        self.monitor_ok = ok
+
+        ttk.Label(ok, text="CPU", font=bold).grid(row=0, column=0, sticky="w")
+        self.cpu_bar = ttk.Progressbar(ok, maximum=100, length=90)
+        self.cpu_bar.grid(row=0, column=1, padx=8, pady=1)
+        self.cpu_var = tk.StringVar(value="--")
+        ttk.Label(ok, textvariable=self.cpu_var, font=mono, width=36).grid(
+            row=0, column=2, sticky="w"
+        )
+
+        ttk.Label(ok, text="RAM", font=bold).grid(row=1, column=0, sticky="w")
+        self.ram_bar = ttk.Progressbar(ok, maximum=100, length=90)
+        self.ram_bar.grid(row=1, column=1, padx=8, pady=1)
+        self.ram_var = tk.StringVar(value="--")
+        ttk.Label(ok, textvariable=self.ram_var, font=mono, width=36).grid(
+            row=1, column=2, sticky="w"
+        )
+
+        ttk.Label(ok, text="RED", font=bold).grid(row=2, column=0, sticky="w")
+        self.net_var = tk.StringVar(value="--")
+        ttk.Label(ok, textvariable=self.net_var, font=mono).grid(
+            row=2, column=1, columnspan=2, sticky="w", padx=8
+        )
+
+        # --- Vista de error (clic = ayuda)
+        err = ttk.Frame(box, cursor="hand2")
+        self.monitor_err = err
+        title = ttk.Label(
+            err, text="? Monitor no disponible", foreground="#c0392b",
+            font=("Segoe UI", 9, "bold"), cursor="hand2",
+        )
+        self.monitor_err_var = tk.StringVar()
+        detail = ttk.Label(
+            err, textvariable=self.monitor_err_var, foreground="#666",
+            font=("Segoe UI", 8), wraplength=330, justify="right", cursor="hand2",
+        )
+        hint = ttk.Label(
+            err, text="Clic acÃ¡ para ver la soluciÃ³n", foreground="#1a5fb4",
+            font=("Segoe UI", 8, "underline"), cursor="hand2",
+        )
+        for widget in (title, detail, hint):
+            widget.pack(anchor="e")
+        for widget in (err, title, detail, hint):
+            widget.bind("<Button-1>", lambda _e: self._show_monitor_help())
+
+        if psutil is None:
+            self._set_monitor_error(PSUTIL_ERROR or "No se pudo importar psutil.", missing=True)
+        else:
+            ok.pack()
+
+    def _set_monitor_error(self, message, missing):
+        self.monitor_error = message
+        self.monitor_missing = missing
+        self.monitor_err_var.set(short(message, 110))
+        self.monitor_ok.pack_forget()
+        self.monitor_err.pack(anchor="e")
+
+    def _clear_monitor_error(self):
+        self.monitor_error = None
+        self.monitor_missing = False
+        self.monitor_err.pack_forget()
+        self.monitor_ok.pack()
+
+    def _start_monitor(self):
+        if psutil is None:
+            return
+        try:
+            psutil.cpu_percent(interval=None)  # la primera lectura siempre da 0
+        except Exception as exc:
+            self._set_monitor_error(f"{type(exc).__name__}: {exc}", missing=False)
+        self._net_prev = None
+        if self._monitor_job is None:
+            self._monitor_job = self.root.after(300, self._update_monitor)
+
+    @staticmethod
+    def _net_totals():
+        """Bytes recibidos / enviados por todas las interfaces (sin loopback)."""
+        rx = tx = 0
+        for name, counters in psutil.net_io_counters(pernic=True).items():
+            if name == "lo" or name.lower().startswith("loopback"):
+                continue
+            rx += counters.bytes_recv
+            tx += counters.bytes_sent
+        return rx, tx
+
+    def _update_monitor(self):
+        self._monitor_job = None
+        try:
+            cpu = psutil.cpu_percent(interval=None)
+            mem = psutil.virtual_memory()
+            now = time.monotonic()
+            rx, tx = self._net_totals()
+
+            self.cpu_bar["value"] = cpu
+            self.cpu_var.set(f"{cpu:.0f}% usado Â· {100 - cpu:.0f}% libre")
+
+            gb = 1024 ** 3
+            self.ram_bar["value"] = mem.percent
+            self.ram_var.set(
+                f"{mem.percent:.0f}% usada Â· {100 - mem.percent:.0f}% libre "
+                f"({mem.available / gb:.1f}/{mem.total / gb:.1f} GB)"
+            )
+
+            if self._net_prev is not None:
+                t0, rx0, tx0 = self._net_prev
+                dt = max(now - t0, 1e-6)
+                down = max(rx - rx0, 0) / dt
+                up = max(tx - tx0, 0) / dt
+                self.net_var.set(f"? {fmt_speed(down)}   ? {fmt_speed(up)}")
+            self._net_prev = (now, rx, tx)
+
+            if self.monitor_error is not None:  # se recuperÃ³ solo
+                self._clear_monitor_error()
+
+        except Exception as exc:
+            # Se muestra el error (sin afectar la comprobaciÃ³n) y se sigue reintentando.
+            message = f"{type(exc).__name__}: {exc}"
+            if message != self.monitor_error:
+                self._set_monitor_error(message, missing=False)
+
+        self._monitor_job = self.root.after(1000, self._update_monitor)
+
+    # ---- Ayuda: quÃ© pasÃ³, cÃ³mo solucionarlo y botÃ³n para copiar el comando
+    def _show_monitor_help(self):
+        win = self._help_win
+        if win is not None and win.winfo_exists():
+            win.deiconify()
+            win.lift()
+            win.focus_force()
+            return
+
+        missing = self.monitor_missing
+        verb = "install" if missing else "install --upgrade"
+        exe = None if getattr(sys, "frozen", False) else sys.executable
+
+        commands = []
+        if exe:
+            commands.append((
+                "Instala en el mismo Python que ejecuta esta app (recomendado):",
+                f'"{exe}" -m pip {verb} psutil',
+            ))
+        commands.append((
+            "VersiÃ³n corta (si el anterior falla):" if exe else "Comando:",
+            f"py -m pip {verb} psutil",
+        ))
+
+        win = tk.Toplevel(self.root)
+        win.title("Monitor del sistema: cÃ³mo solucionarlo")
+        win.transient(self.root)
+        win.resizable(False, False)
+        win.protocol("WM_DELETE_WINDOW", self._close_monitor_help)
+        self._help_win = win
+
+        frame = ttk.Frame(win, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            frame, text="? Monitor del sistema no disponible",
+            font=("Segoe UI", 12, "bold"), foreground="#c0392b",
+        ).pack(anchor="w")
+
+        ttk.Label(frame, text="Error detectado:", font=("Segoe UI", 9, "bold")).pack(
+            anchor="w", pady=(12, 2)
+        )
+        error_box = tk.Text(frame, height=3, width=78, wrap="word", font=("Consolas", 9))
+        error_box.insert("1.0", self.monitor_error or "Sin detalle.")
+        error_box.configure(state="disabled")
+        error_box.pack(fill="x")
+
+        ttk.Label(frame, text="SoluciÃ³n:", font=("Segoe UI", 9, "bold")).pack(
+            anchor="w", pady=(12, 2)
+        )
+        why = (
+            "Falta el mÃ³dulo psutil, que el monitor usa para leer CPU, RAM y red."
+            if missing else
+            "psutil estÃ¡ instalado, pero fallÃ³ al leer los datos del sistema. "
+            "Actualizarlo suele resolverlo."
+        )
+        ttk.Label(frame, text=why, wraplength=620, justify="left").pack(anchor="w")
+        ttk.Label(
+            frame,
+            text=("1) AbrÃ­ CMD: presionÃ¡ Win + R, escribÃ­ cmd y Enter.\n"
+                  "2) PegÃ¡ el comando (clic derecho o Ctrl+V) y presionÃ¡ Enter.\n"
+                  "3) Cuando termine, volvÃ© acÃ¡ y presionÃ¡ Â«ReintentarÂ»."),
+            justify="left",
+        ).pack(anchor="w", pady=(8, 2))
+
+        for caption, command in commands:
+            ttk.Label(frame, text=caption, foreground="#666").pack(anchor="w", pady=(8, 2))
+            row = ttk.Frame(frame)
+            row.pack(fill="x")
+            entry = ttk.Entry(row, font=("Consolas", 9))
+            entry.insert(0, command)
+            entry.configure(state="readonly")
+            entry.pack(side="left", fill="x", expand=True)
+            button = ttk.Button(row, text="Copiar comando")
+            button.configure(command=lambda c=command, b=button: self._copy_to_clipboard(c, b))
+            button.pack(side="left", padx=(8, 0))
+
+        status = ttk.Label(frame, text="", wraplength=620, justify="left")
+        status.pack(anchor="w", pady=(10, 0))
+
+        bottom = ttk.Frame(frame)
+        bottom.pack(fill="x", pady=(12, 0))
+        ttk.Button(bottom, text="Reintentar", command=lambda: self._retry_monitor(status)).pack(
+            side="left"
+        )
+        ttk.Button(bottom, text="Cerrar", command=self._close_monitor_help).pack(side="right")
+
+        win.geometry(f"+{self.root.winfo_rootx() + 60}+{self.root.winfo_rooty() + 60}")
+
+    def _close_monitor_help(self):
+        if self._help_win is not None:
+            try:
+                self._help_win.destroy()
+            except Exception:
+                pass
+        self._help_win = None
+
+    def _copy_to_clipboard(self, text, button):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.root.update()  # asegura que el portapapeles quede disponible
+        original = button.cget("text")
+        button.configure(text="? Copiado")
+
+        def restore():
+            try:
+                button.configure(text=original)
+            except Exception:
+                pass  # la ventana ya se cerrÃ³
+
+        self.root.after(2000, restore)
+
+    def _retry_monitor(self, status_label):
+        """Reintenta cargar psutil sin reiniciar la app (Ãºtil justo despuÃ©s de instalarlo)."""
+        global psutil
+        try:
+            importlib.invalidate_caches()
+            module = importlib.import_module("psutil")
+            module.cpu_percent(interval=None)
+            module.virtual_memory()
+            module.net_io_counters(pernic=True)
+        except Exception as exc:
+            status_label.configure(
+                text=(f"TodavÃ­a no funciona: {type(exc).__name__}: {exc}\n"
+                      "Si ya ejecutaste el comando, cerrÃ¡ y volvÃ© a abrir la app."),
+                foreground="#c0392b",
+            )
+            return
+
+        psutil = module
+        self._clear_monitor_error()
+        self._start_monitor()
+        self._close_monitor_help()
 
     # ------------------------------------------- Ventana "+" (varias listas)
     def _build_sources_window(self):
@@ -456,7 +753,7 @@ class IPTVChecker:
 
         ttk.Label(
             frame,
-            text=("Cargá las listas (URL o archivo). Al iniciar se leen todas, se combinan en "
+            text=("CargÃ¡ las listas (URL o archivo). Al iniciar se leen todas, se combinan en "
                   "una sola y se verifican juntas."),
             foreground="#666",
         ).pack(anchor="w", pady=(0, 10))
@@ -469,7 +766,7 @@ class IPTVChecker:
             ttk.Label(grid, text=f"{i + 1}.", width=3, anchor="e").grid(row=i, column=0, pady=2)
             entry = ttk.Entry(grid, textvariable=var, width=72)
             entry.grid(row=i, column=1, sticky="ew", padx=6, pady=2)
-            btn = ttk.Button(grid, text="…", width=3, command=lambda n=i: self._browse_multi(n))
+            btn = ttk.Button(grid, text="â€¦", width=3, command=lambda n=i: self._browse_multi(n))
             btn.grid(row=i, column=2, pady=2)
             self._controls.extend([entry, btn])
 
@@ -479,7 +776,7 @@ class IPTVChecker:
         clear_btn = ttk.Button(bottom, text="Limpiar todas", command=self._clear_sources)
         clear_btn.pack(side="left")
         popup_start = ttk.Button(
-            bottom, text="INICIAR COMPROBACIÓN", command=self._start_from_window
+            bottom, text="INICIAR COMPROBACIÃ“N", command=self._start_from_window
         )
         popup_start.pack(side="right")
         self._controls.extend([clear_btn, popup_start])
@@ -515,9 +812,9 @@ class IPTVChecker:
     def _update_sources_info(self):
         count = len(self._get_sources())
         if count <= 1:
-            text = "Listas cargadas: " + str(count) + "   (usá + para sumar más)"
+            text = "Listas cargadas: " + str(count) + "   (usÃ¡ + para sumar mÃ¡s)"
         else:
-            text = f"Listas cargadas: {count}   (se combinarán en una sola)"
+            text = f"Listas cargadas: {count}   (se combinarÃ¡n en una sola)"
         self.sources_info.configure(text=text)
 
     def _browse_multi(self, start_index):
@@ -556,7 +853,7 @@ class IPTVChecker:
             if not self.running:
                 self.workers_spin.configure(state="normal")
             self.workers_hint.configure(
-                text="Más canales a la vez = más rápido, pero más CPU y red."
+                text="MÃ¡s canales a la vez = mÃ¡s rÃ¡pido, pero mÃ¡s CPU y red."
             )
             self.preview.pack_forget()
 
@@ -583,7 +880,7 @@ class IPTVChecker:
 
     # ------------------------------------------------------------- Control
     def start(self):
-        """Inicia la comprobación. Devuelve True si arrancó."""
+        """Inicia la comprobaciÃ³n. Devuelve True si arrancÃ³."""
         if self.running:
             return False
 
@@ -593,8 +890,8 @@ class IPTVChecker:
             messagebox.showerror(
                 "Falta VLC / python-vlc",
                 "No se pudo cargar VLC desde Python.\n\n"
-                "1) Instalá el módulo: py -m pip install python-vlc\n"
-                "2) Instalá VLC de escritorio (64 bits si tu Python es de 64 bits).\n\n"
+                "1) InstalÃ¡ el mÃ³dulo: py -m pip install python-vlc\n"
+                "2) InstalÃ¡ VLC de escritorio (64 bits si tu Python es de 64 bits).\n\n"
                 f"Detalle: {VLC_ERROR}",
                 parent=parent,
             )
@@ -604,7 +901,7 @@ class IPTVChecker:
         if not sources:
             messagebox.showwarning(
                 "Falta la lista",
-                "Pegá el enlace M3U o seleccioná un archivo (con + podés cargar varias).",
+                "PegÃ¡ el enlace M3U o seleccionÃ¡ un archivo (con + podÃ©s cargar varias).",
                 parent=parent,
             )
             return False
@@ -612,7 +909,7 @@ class IPTVChecker:
         seconds = self._read_int(self.seconds_var, 1, 120)
         if seconds is None:
             messagebox.showerror(
-                "Tiempo incorrecto", "Ingresá un tiempo entre 1 y 120 segundos.", parent=parent
+                "Tiempo incorrecto", "IngresÃ¡ un tiempo entre 1 y 120 segundos.", parent=parent
             )
             return False
 
@@ -624,7 +921,7 @@ class IPTVChecker:
             if workers is None:
                 messagebox.showerror(
                     "Cantidad incorrecta",
-                    f"Ingresá una cantidad de canales simultáneos entre 1 y {MAX_WORKERS}.",
+                    f"IngresÃ¡ una cantidad de canales simultÃ¡neos entre 1 y {MAX_WORKERS}.",
                     parent=parent,
                 )
                 return False
@@ -653,10 +950,10 @@ class IPTVChecker:
         self.progress_var.set("0%")
         self.count_var.set("Comprobados: 0 / 0     Funcionan: 0     Fallidos: 0")
         self.elapsed_var.set("Tiempo transcurrido: 00:00:00")
-        self.remaining_var.set("Tiempo restante: calculando…")
+        self.remaining_var.set("Tiempo restante: calculandoâ€¦")
         self.current_var.set(
-            "Descargando y leyendo la lista…" if len(sources) == 1
-            else f"Descargando y leyendo {len(sources)} listas…"
+            "Descargando y leyendo la listaâ€¦" if len(sources) == 1
+            else f"Descargando y leyendo {len(sources)} listasâ€¦"
         )
 
         self.start_btn.configure(state="disabled")
@@ -665,7 +962,7 @@ class IPTVChecker:
         self._set_controls(False)
 
         self._log("-" * 60)
-        self._log(f"Iniciando comprobación en modo {mode.upper()} ({len(sources)} lista(s))")
+        self._log(f"Iniciando comprobaciÃ³n en modo {mode.upper()} ({len(sources)} lista(s))")
 
         self.worker = threading.Thread(
             target=self._run_checks,
@@ -678,7 +975,7 @@ class IPTVChecker:
 
     def stop(self):
         self.stop_event.set()
-        self.current_var.set("Deteniendo… esperando a que terminen los canales en curso")
+        self.current_var.set("Deteniendoâ€¦ esperando a que terminen los canales en curso")
         self.stop_btn.configure(state="disabled")
 
     def on_close(self):
@@ -752,7 +1049,7 @@ class IPTVChecker:
                 args.append("--aout=dummy" if accept_audio else "--no-audio")
             instance = vlc.Instance(*args)
             if instance is None:
-                raise RuntimeError("No se pudo iniciar VLC. Revisá que esté instalado "
+                raise RuntimeError("No se pudo iniciar VLC. RevisÃ¡ que estÃ© instalado "
                                    "y que coincida la arquitectura (32/64 bits) con Python.")
 
             tasks = queue.Queue()
@@ -792,7 +1089,7 @@ class IPTVChecker:
 
     def _worker_loop(self, number, instance, tasks, seconds, mode, accept_audio, wid):
         player = None
-        sink = None  # debe vivir más que el reproductor (sus callbacks)
+        sink = None  # debe vivir mÃ¡s que el reproductor (sus callbacks)
         try:
             player = instance.media_player_new()
             if mode == "silencio":
@@ -832,7 +1129,7 @@ class IPTVChecker:
     # ------------------------------------------------------ Prueba de canal
     @staticmethod
     def _is_dead(state, seen_active):
-        # Stopped/Ended solo valen después de haber visto actividad: justo tras
+        # Stopped/Ended solo valen despuÃ©s de haber visto actividad: justo tras
         # play() el reproductor puede seguir reportando "Stopped" un instante.
         return state == vlc.State.Error or (
             seen_active and state in (vlc.State.Ended, vlc.State.Stopped)
@@ -849,7 +1146,7 @@ class IPTVChecker:
         return "ok"
 
     def _test_channel(self, instance, player, sink, url, seconds, mode, accept_audio):
-        """Devuelve (ok, detalle, resolución). ok=None si el usuario detuvo la prueba."""
+        """Devuelve (ok, detalle, resoluciÃ³n). ok=None si el usuario detuvo la prueba."""
         media = None
         try:
             if sink is not None:
@@ -914,17 +1211,17 @@ class IPTVChecker:
             if result == "stop":
                 return None, "Detenido", ""
             if result == "ok" and player.get_state() == vlc.State.Playing:
-                return True, f"Solo audio: reproducción estable durante {seconds} s", ""
-            return False, "El audio se interrumpió antes de completar la prueba", ""
+                return True, f"Solo audio: reproducciÃ³n estable durante {seconds} s", ""
+            return False, "El audio se interrumpiÃ³ antes de completar la prueba", ""
 
         if sink.frames == 0:
             if state == vlc.State.Error:
-                return False, "VLC reportó un error al abrir el stream", ""
+                return False, "VLC reportÃ³ un error al abrir el stream", ""
             if self._is_dead(state, seen_active):
-                return False, "El stream terminó sin entregar video", ""
+                return False, "El stream terminÃ³ sin entregar video", ""
             return False, f"No se recibieron cuadros de video en {STARTUP_TIMEOUT} s", ""
 
-        # 2) Ventana de verificación: los cuadros deben seguir llegando
+        # 2) Ventana de verificaciÃ³n: los cuadros deben seguir llegando
         forced_size = (sink.width, sink.height)
         width, height = get_video_resolution(player, media, forced_size)
         first = sink.frames
@@ -932,7 +1229,7 @@ class IPTVChecker:
         if self._hold(player, seconds) == "stop":
             return None, "Detenido", ""
 
-        # Se vuelve a leer al final: suele ser más fiable (sobre todo en streams HLS).
+        # Se vuelve a leer al final: suele ser mÃ¡s fiable (sobre todo en streams HLS).
         w2, h2 = get_video_resolution(player, media, forced_size)
         if w2 > 0 and h2 > 0:
             width, height = w2, h2
@@ -941,10 +1238,10 @@ class IPTVChecker:
         gained = sink.frames - first
         needed = max(2, int(seconds * MIN_FPS))
         if gained >= needed:
-            res_text = f"{width}x{height} ({label}) · " if label else "resolución no detectada · "
+            res_text = f"{width}x{height} ({label}) Â· " if label else "resoluciÃ³n no detectada Â· "
             return True, f"{res_text}{sink.frames} cuadros (+{gained} en {seconds} s)", label
         return False, (f"Video inestable: solo {gained} cuadros nuevos en {seconds} s "
-                       f"(mínimo {needed})"), ""
+                       f"(mÃ­nimo {needed})"), ""
 
     def _judge_visual(self, player, media, seconds, accept_audio):
         deadline = time.monotonic() + STARTUP_TIMEOUT
@@ -964,7 +1261,7 @@ class IPTVChecker:
                 break
 
         if not started:
-            return False, f"VLC no pudo iniciar la reproducción en {STARTUP_TIMEOUT} s", ""
+            return False, f"VLC no pudo iniciar la reproducciÃ³n en {STARTUP_TIMEOUT} s", ""
 
         result = self._hold(player, seconds)
         if result == "stop":
@@ -972,15 +1269,15 @@ class IPTVChecker:
 
         state = player.get_state()
         if result != "ok" or state != vlc.State.Playing:
-            return False, f"La reproducción se interrumpió (estado VLC: {state})", ""
+            return False, f"La reproducciÃ³n se interrumpiÃ³ (estado VLC: {state})", ""
 
         if player.video_get_track_count() > 0:
             width, height = get_video_resolution(player, media)
             label = classify_resolution(width, height)
-            res_text = f"{width}x{height} ({label}) · " if label else "resolución no detectada · "
-            return True, f"{res_text}reproducción con video estable durante {seconds} s", label
+            res_text = f"{width}x{height} ({label}) Â· " if label else "resoluciÃ³n no detectada Â· "
+            return True, f"{res_text}reproducciÃ³n con video estable durante {seconds} s", label
         if accept_audio:
-            return True, f"Solo audio: reproducción estable durante {seconds} s", ""
+            return True, f"Solo audio: reproducciÃ³n estable durante {seconds} s", ""
         return False, "Reproduce, pero sin pista de video", ""
 
     # ------------------------------------------------------ Eventos hacia UI
@@ -1025,11 +1322,11 @@ class IPTVChecker:
                 elif kind == "done":
                     stopped = event[1]
                     if stopped:
-                        text = "Comprobación detenida."
+                        text = "ComprobaciÃ³n detenida."
                     elif self.checked < self.total:
-                        text = "Comprobación incompleta (hubo errores con VLC)."
+                        text = "ComprobaciÃ³n incompleta (hubo errores con VLC)."
                     else:
-                        text = "Comprobación finalizada."
+                        text = "ComprobaciÃ³n finalizada."
                     self.current_var.set(text)
                     self._log(
                         f"Finalizado. Funcionan: {len(self.good)}; fallidos: {len(self.errors)}; "
@@ -1059,7 +1356,7 @@ class IPTVChecker:
             self.errors.append((channel.name, detail))
 
         tag = f" [{resolution}]" if resolution else ""
-        self._log(f"[{'OK' if ok else 'FALLÓ'}] {channel.name}{tag} — {detail}")
+        self._log(f"[{'OK' if ok else 'FALLÃ“'}] {channel.name}{tag} â€” {detail}")
 
         percent = self.checked / self.total * 100 if self.total else 0
         self.progress["value"] = percent
@@ -1082,7 +1379,7 @@ class IPTVChecker:
         def order(key):
             return (RES_ORDER.index(key), key) if key in RES_ORDER else (len(RES_ORDER), key)
 
-        return " · ".join(f"{k}: {counts[k]}" for k in sorted(counts, key=order))
+        return " Â· ".join(f"{k}: {counts[k]}" for k in sorted(counts, key=order))
 
     def _refresh_current(self):
         if not self.running or not self.active or self.stop_event.is_set():
@@ -1093,10 +1390,10 @@ class IPTVChecker:
             self.current_var.set(f"Probando canal {index} de {self.total}: {name}")
             return
 
-        names = [n if len(n) <= 28 else n[:27] + "…" for n in self.active.values()]
+        names = [n if len(n) <= 28 else n[:27] + "â€¦" for n in self.active.values()]
         text = f"Probando {len(names)} canales a la vez: " + ", ".join(names[:3])
         if len(names) > 3:
-            text += f" y {len(names) - 3} más"
+            text += f" y {len(names) - 3} mÃ¡s"
         self.current_var.set(text)
 
     # --------------------------------------------------------------- Tiempos
@@ -1107,7 +1404,7 @@ class IPTVChecker:
         return end - self.test_start
 
     def _estimate_remaining(self):
-        """Estimación según la duración media por canal y los canales en paralelo."""
+        """EstimaciÃ³n segÃºn la duraciÃ³n media por canal y los canales en paralelo."""
         if self.checked == 0:
             return None
         remaining = max(self.total - self.checked, 0)
@@ -1125,7 +1422,7 @@ class IPTVChecker:
         if self.running:
             eta = self._estimate_remaining()
             self.remaining_var.set(
-                "Tiempo restante: calculando…" if eta is None
+                "Tiempo restante: calculandoâ€¦" if eta is None
                 else f"Tiempo restante: {fmt_time(eta)}"
             )
         else:
@@ -1185,7 +1482,7 @@ class IPTVChecker:
 def main():
     if sys.platform.startswith("win"):
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # UI nítida con escalado
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # UI nÃ­tida con escalado
         except Exception:
             pass
 
